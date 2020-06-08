@@ -29,9 +29,11 @@ __device void MatMul(float *A, float *B, float *out,
 int fit(Layer model[], float *data, float *labels, 
         const int epochs, int batch_size, int val_split)
 {
+    //feed forward parth, matrix multiply each input by the weights matrix
     for(int i=0; i<sizeof(model)/sizeof(model[0]); i++)
     {
-        Matmul<<<dims here>>>(model[i].d_data, model[i].d_weights, model[i].d_output)
+        Matmul<<<dims here>>>(model[i].d_data, model[i].d_weights, model[i].d_output);
+        BiasTerm<<<dims here>>>(model[i].offset)
     }
 }
 
@@ -45,9 +47,9 @@ int main()
     d_data = cudaMalloc(&data, size.x * size.y * sizeof(float));
     d_labels = cudaMalloc(&data, size.x * labelsize * sizeof(float));
 
-    Dense input = Dense(d_data, 100);
-    Dense l1 = Dense(input.d_output, 10, SIGMOID);
-    Dense l2 = Dense(l1.d_output, 1, SIGMOID);
+    Dense input = Dense(d_data, (100, 100));
+    Dense l1 = Dense(input.d_output,(100,100), 10, SIGMOID);
+    Dense l2 = Dense(l1.d_output,(100,10), 1, SIGMOID);
 
     Layer model[3] = {input, l1, l2};
     

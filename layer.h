@@ -17,19 +17,21 @@ public:
 /* Member Data */ 
     int type; // Dense, etc
     int trainable; // 0 not trainable 1 trainable
+    int2 data_dims;
+    int units;
 };
 
 class Input : public Layer
 {
 public:
     float *d_output;
-    int units;
 
     __host__
     Input(float *data, int2 data_dims)
     {
         type = INPUT;
-        dpoints = sizeof(data);
+        this->data_dims = data_dims;
+        this->units = data_dims.y;
 
         cudaMalloc(&d_output, sizeof(data));
         cudaMemcpy(&d_output, data, sizeof(data), cudaMemcpyHostToDevice);
@@ -42,10 +44,9 @@ public:
 
     float *d_data;
     
-    int units;
     int activation;
 
-    float *d_offsets;
+    float *d_offset;
     float *d_weights;
     float *d_output;
     
@@ -54,13 +55,14 @@ public:
     Dense(float *d_data, int2 data_dims, 
           int units, int activation, int trainable=1){
         type = DENSE;
+        this->units = units;
+        this->data_dims = data_dims;
 
         this->d_data = d_data;
-        this->units = units;
         this->activation = activation;
         this->trainable = trainable;
 
-        cudaMalloc(&d_offsets, units*sizeof(float));
+        cudaMalloc(&d_offset, units*sizeof(float));
         cudaMalloc(&d_weights, data_dims.y*units*sizeof(float));
         cudaMalloc(&d_output, data_dims.x*units*sizeof(float)); 
     }
