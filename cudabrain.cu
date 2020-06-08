@@ -13,13 +13,6 @@ __device__ void Sigmoid(int *input, int* output)
 {
 
 }
-__device__ void 
-__global__ void Fit(float *data, float *labels, 
-                    int epochs, int batch_size, 
-                    float validation_split)
-{
-
-}
 
 // A and B are the input matrices to be multiplied.
 // out is the output matrix, AxB
@@ -33,29 +26,38 @@ __device void MatMul(float *A, float *B, float *out,
 
 }
 
+int fit(Layer model[], float *data, float *labels, 
+        const int epochs, int batch_size, int val_split)
+{
+    for(int i=0; i<sizeof(model)/sizeof(model[0]); i++)
+    {
+        Matmul<<<dims here>>>(model[i].d_data, model[i].d_weights, model[i].d_output)
+    }
+}
+
 int main()
 {
     int2 size = (100,100);
     int labelsize = 2;
     float data[size.x][size.y];
     float labels[size.x][labelsize];
-    Layer l1 = Dense(2); // has input+1 * output weights to train
-    Layer l2 = Activation("Sigmoid");
-
-    // currently only supports sequential models
-    model = {l1,l2};
 
     d_data = cudaMalloc(&data, size.x * size.y * sizeof(float));
-    d_labels = cudaMalloc(&data, size.x * labelsize * sizeof(float))
-    d_model = cudaMalloc(&model, sizeof(model));
+    d_labels = cudaMalloc(&data, size.x * labelsize * sizeof(float));
 
+    Dense input = Dense(d_data, 100);
+    Dense l1 = Dense(input.d_output, 10, SIGMOID);
+    Dense l2 = Dense(l1.d_output, 1, SIGMOID);
+
+    Layer model[3] = {input, l1, l2};
+    
     dim3 dimBlock(BLOCK_SIZE);
     dim3 dimGrid(size.x/dimBlock.x);
 
     int epochs = 10;
     int batch_size = 100
     int validation_split = 0.2;
-    Fit<<<dimGrid, dimBlock>>>(d_model, d_data, d_labels, 
-                                epochs, batch_size, validation_split);
+    fit(model, d_data, d_labels, 
+        epochs, batch_size, validation_split);
 
 }

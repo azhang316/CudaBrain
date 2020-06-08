@@ -1,8 +1,13 @@
+#include <cuda.h>
+
 #ifndef LAYER_H
 #define LAYER_H
 
-#define DENSE_H 0
-#define
+#define INPUT 0 
+#define DENSE 1
+
+#define SIGMOID 0
+
 /* This is a header file for cudabrain, since it is compiled with nvcc, it has the CUDA extensions for C++ */ 
 
 class Layer
@@ -14,84 +19,57 @@ public:
     int trainable; // 0 not trainable 1 trainable
 };
 
+class Input : public Layer
+{
+public:
+    float *d_output;
+    int units;
+
+    __host__
+    Input(float *data, int2 data_dims)
+    {
+        type = INPUT;
+        dpoints = sizeof(data);
+
+        cudaMalloc(&d_output, sizeof(data));
+        cudaMemcpy(&d_output, data, sizeof(data), cudaMemcpyHostToDevice);
+    }
+}
+
 class Dense : public Layer
 {
 public:
 
-    int units;
+    float *d_data;
     
-    /* Constructor  we want this class to be able to be generated both on CPU and GPU*/ 
+    int units;
+    int activation;
+
+    float *d_offsets;
+    float *d_weights;
+    float *d_output;
+    
+    /* Constructor: we create this class on the CPU and memory is copied to GPU for usage*/ 
     __host__
-    Dense(const int units, const int w, const int s = 0, const int type = 0){
-        type = DENSE_H; 
+    Dense(float *d_data, int2 data_dims, 
+          int units, int activation, int trainable=1){
+        type = DENSE;
+
+        this->d_data = d_data;
         this->units = units;
-        stride = (s==0)?w:s; 
-        my_type = type; //Matrix knows if it's CPU or GPU 
-        if(type == 0)
-            e   lements = new float[width*height];
-        else if(type == 1)
-            cudaMalloc(&elements, width*height*sizeof(float)); 
+        this->activation = activation;
+        this->trainable = trainable;
+
+        cudaMalloc(&d_offsets, units*sizeof(float));
+        cudaMalloc(&d_weights, data_dims.y*units*sizeof(float));
+        cudaMalloc(&d_output, data_dims.x*units*sizeof(float)); 
     }
 
-/* member functions */ 
-
-    void load(const Matrix old_matrix, const int dir = 0){
-        size_t size = width*height*sizeof(float);
-        if(dir == 0){ //CPU copy
-            memcpy(elements, old_matrix.elements, size); 
-        }
-        else if(dir == 1){ //GPU copy host to device
-            cudaMemcpy(elements, old_matrix.elements, size, cudaMemcpyHostToDevice);  
-        }
-        else if(dir == 2){ //GPU copy device to host
-            cudaMemcpy(elements, old_matrix.elements, size, cudaMemcpyDeviceToHost);  
-        }
-    }
-
-    void dealloc(int Proc = 0){
-        if(Proc == 0)
-            delete elements;
-        else
-            cudaFree(elements); 
+    void dealloc(){
+        cudaFree(d_offsets);
+        cudaFree(d_weights);
+        cudaFree(d_output);
     }
 };
 
-
-/* This class only is available on the GPU  
-   Gets the BLOCK_SIZE x BLOCK_SIZE submatrix of a matrix that is
-   located col sub-matrices to the right and row sub-matrices down
-   from the upper-left corner of A */
-
-class subMatrix{
-    public:
-    /* Member Data */ 
-    int width; 
-    int height; 
-    int stride;
-    float* elements; 
-
-    __device__
-    subMatrix(Matrix A, int sub_size, int row, int col)
-    {
-        width = sub_size;
-        height = sub_size;
-        stride = A.stride;
-        // memory at spot
-        elements = &A.elements[stride * width * row + height * col];
-     }
-
-//Get matrix element
-    __device__ 
-    inline float GetElem(const int row, const int col)
-	{
-		return elements[row*stride + col];
-	}
-
-//Set a matrix element
-    __device__ 
-    inline void SetElem(const int row, const int col, const float value)
-	{
-		 elements[row * stride + col] = value; 
-	}
-};
 #endif
