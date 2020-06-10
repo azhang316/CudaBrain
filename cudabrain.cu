@@ -16,7 +16,7 @@ __device__ void Sigmoid(int *input, int* output)
 
 }
 
-__device__ void FeedForward(float data[][], float weights[][], float bias[][], float output[][])
+__device__ void FeedForward(float data[], float weights[], /*float bias[],*/ float output[])
 {
     __shared__ float As[BLOCK_SIZE][BLOCK_SIZE];
     __shared__ float Bs[BLOCK_SIZE][BLOCK_SIZE];
@@ -30,14 +30,19 @@ __device__ void FeedForward(float data[][], float weights[][], float bias[][], f
     int row = blockRow*BLOCK_SIZE + threadIdx.y;
     int col = blockCol*BLOCK_SIZE + threadIdx.x;
 
-    float Cvalue = bias[row][col];
+    int pos = row * gridDim.x * BLOCK_SIZE + col;
+
+    float Cvalue = 0;//bias[pos];
+
+    float prevrows = row*gridDim*BLOCK_SIZE + threadCol;
+    float prevcols = threadRow*gridDim.x*BLOCK_SIZE + col
 
     //processes each output chunk one submatrix at a time to use shared memory optimally
     for(int m = 0; m < gridDim; m++)
     {
         //Loading submatrixes into shared memory, Bs is also transposed
-        As[threadRow][threadCol] = data[row][m*BLOCK_SIZE + threadCol];
-        Bs[threadCol][threadRow] = weights[m*BLOCK_SIZE + threadRow][col];
+        As[threadRow][threadCol] = data[prevrows + m*BLOCK_SIZE];
+        Bs[threadCol][threadRow] = weights[prevcols + m*BLOCK_SIZE*gridDim.x*BLOCK_SIZE];
         __syncthreads();
 
         //Increments Cvalue for all the shared memory elements
@@ -46,7 +51,7 @@ __device__ void FeedForward(float data[][], float weights[][], float bias[][], f
         __syncthreads();
     }
 
-    output[row][col] = Cvalue;
+    output[pos] = Cvalue;
 }
 
 int fit(Dense model[], float *data, float *labels, 
@@ -56,7 +61,7 @@ int fit(Dense model[], float *data, float *labels,
     dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
     for(int i=0; i<sizeof(model)/sizeof(model[0]); i++)
     {
-        dim3 dimGrid(model[i])
+        dim3 dimGrid(model[i].data_len / BLOCK_SIZE)
         FeedForward<<<,100>>>(model[i])
     }
 
@@ -67,28 +72,38 @@ int fit(Dense model[], float *data, float *labels,
 
 int main()
 {
-    int2 size = make_int2(100,100);
+    int2 size = make_int2(1024,1024);
     int labelsize = 2;
-    float data[size.x][size.y];
-    float labels[size.x][labelsize];
+    float data[size.x * size.y];
+    float labels[size.x * labelsize];
+
+    for(int i = 0; i < 1024*1024; i++)
+        data[i] = 1
 
     float* d_data;
     float* d_labels;
+
     cudaMalloc(&d_data, size.x * size.y * sizeof(float));
-    cudaMalloc(&d_labels, size.x * labelsize * sizeof(float));
     cudaMemcpy(d_data, data, size.x * size.y * sizeof(float), cudaMemcpyHostToDevice);
+
+    float* d_weights;
+    cudaMalloc(&d_weights, size.x * size.y * sizeof(float));
+    cudaMemcpy(d_weights, data, size.x * size.y * sizeof(float), cudaMemcpyHostToDevice);
+    
+
+/*    cudaMalloc(&d_labels, size.x * labelsize * sizeof(float));
     cudaMemcpy(d_labels, labels, size.x * labelsize * sizeof(float), cudaMemcpyHostToDevice);
 
     Dense l1 = Dense(d_data, 100,100, 10, 1, 1);
     Dense l2 = Dense(l1.d_output, 100,10, 1, 1, 1);
 
     Dense model[2] = {input, l1, l2};
-   
-    print(sizeof("%i",model[0]));
-    print(sizeof("%i",model[2]));
+*/
 
-    dim3 dimBlock(BLOCK_SIZE);
-    dim3 dimGrid(size.x/dimBlock.x);
+
+
+    dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
+    dim3 dimGrid(size.x/dimBlock.x, );
 
     int epochs = 10;
     int batch_size = 100;

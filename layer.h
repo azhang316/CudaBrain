@@ -55,7 +55,7 @@ public:
     int trainable;
 
     float *d_data; //input data
-    int data_lenx, data_leny; //input data dimensions
+    int num_rows, num_cols; //input data dimensions
     
     float *d_offset;
     float *d_weights;
@@ -66,9 +66,9 @@ public:
 
     /* Constructor: we create this class on the CPU and memory is copied to GPU for usage*/ 
     __host__
-    Dense(float *d_data, int data_lenx, int data_leny, 
+    Dense(float *d_data, int num_rows, int num_cols, 
           int units, int activation, int trainable)
-            :d_data(d_data), data_lenx(data_lenx), data_leny(data_leny),
+            :d_data(d_data), num_rows(num_rows), num_cols(num_cols),
             units(units), activation(activation), trainable(trainable)
     { 
         type = DENSE;
