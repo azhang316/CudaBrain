@@ -10,65 +10,76 @@
 
 /* This is a header file for cudabrain, since it is compiled with nvcc, it has the CUDA extensions for C++ */ 
 
-class Layer
-{
-public:
+//class Layer
+//{
+//public:
 
 /* Member Data */ 
-    int type; // Dense, etc
-    int trainable; // 0 not trainable 1 trainable
-    int2 data_dims;
-    int units;
-};
+  //  int type; // Dense, etc
+    //int trainable; // 0 not trainable 1 trainable
+   
+    //float *d_data; //input data
+    //int2 data_dims; //input data dimensions
+    
+    //float *d_offset;
+    //float *d_weights;
 
+    //float *d_output;
+    //int units; //outputs of layer
+//};
+/*
 class Input : public Layer
 {
 public:
-    float *d_output;
-
     __host__
-    Input(float *data, int2 data_dims)
+    Input(float *data, int2 in_data_dims)
     {
         type = INPUT;
-        this->data_dims = data_dims;
-        this->units = data_dims.y;
+        data_dims = in_data_dims;
+        units = data_dims.y;
 
         cudaMalloc(&d_output, sizeof(data));
         cudaMemcpy(&d_output, data, sizeof(data), cudaMemcpyHostToDevice);
     }
-}
 
-class Dense : public Layer
+    void dealloc(){
+        cudaFree(d_output);
+    }
+
+};*/
+
+class Dense //: public Layer
 {
 public:
+    int type;
+    int trainable;
 
-    float *d_data;
+    float *d_data; //input data
+    int data_lenx, data_leny; //input data dimensions
     
-    int activation;
-
     float *d_offset;
     float *d_weights;
+    int activation;
+
     float *d_output;
-    
+    int units; //outputs of layer
+
     /* Constructor: we create this class on the CPU and memory is copied to GPU for usage*/ 
     __host__
-    Dense(float *d_data, int2 data_dims, 
-          int units, int activation, int trainable=1){
+    Dense(float *d_data, int data_lenx, int data_leny, 
+          int units, int activation, int trainable)
+            :d_data(d_data), data_lenx(data_lenx), data_leny(data_leny),
+            units(units), activation(activation), trainable(trainable)
+    { 
         type = DENSE;
-        this->units = units;
-        this->data_dims = data_dims;
 
-        this->d_data = d_data;
-        this->activation = activation;
-        this->trainable = trainable;
-
-        cudaMalloc(&d_offset, units*sizeof(float));
-        cudaMalloc(&d_weights, data_dims.y*units*sizeof(float));
-        cudaMalloc(&d_output, data_dims.x*units*sizeof(float)); 
+        //cudaMalloc(&d_offset, units*sizeof(float));
+        //cudaMalloc(&d_weights, data_dims.y*units*sizeof(float));
+        //cudaMalloc(&d_output, data_dims.x*units*sizeof(float)); 
     }
 
     void dealloc(){
-        cudaFree(d_offsets);
+        cudaFree(d_offset);
         cudaFree(d_weights);
         cudaFree(d_output);
     }
