@@ -73,9 +73,9 @@ public:
     { 
         type = DENSE;
 
-        //cudaMalloc(&d_offset, units*sizeof(float));
-        //cudaMalloc(&d_weights, data_dims.y*units*sizeof(float));
-        //cudaMalloc(&d_output, data_dims.x*units*sizeof(float)); 
+        cudaMalloc(&d_offset, units*sizeof(float));
+        cudaMalloc(&d_weights, num_cols*units*sizeof(float));
+        cudaMalloc(&d_output, num_rows*units*sizeof(float)); 
     }
 
     void dealloc(){
