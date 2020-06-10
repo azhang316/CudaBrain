@@ -55,9 +55,9 @@ public:
     int trainable;
 
     float *d_data; //input data
-    int num_rows, num_cols; //input data dimensions
+    dim3 size; //input data dimensions
     
-    float *d_offset;
+    float *d_bias;
     float *d_weights;
     int activation;
 
@@ -65,21 +65,27 @@ public:
     int units; //outputs of layer
 
     /* Constructor: we create this class on the CPU and memory is copied to GPU for usage*/ 
-    __host__
+    //__host__
+public:
     Dense(float *d_data, int num_rows, int num_cols, 
           int units, int activation, int trainable)
-            :d_data(d_data), num_rows(num_rows), num_cols(num_cols),
-            units(units), activation(activation), trainable(trainable)
     { 
         type = DENSE;
 
-        cudaMalloc(&d_offset, units*sizeof(float));
-        cudaMalloc(&d_weights, num_cols*units*sizeof(float));
-        cudaMalloc(&d_output, num_rows*units*sizeof(float)); 
+        this->d_data = d_data;
+        size.x = num_rows;
+        size.y = num_cols;
+        size.z = units;
+        this->units = units;
+        this->activation = activation;
+        this->trainable = trainable;
+        cudaMalloc(&d_bias, units*sizeof(float));
+        cudaMalloc(&d_weights, size.y*units*sizeof(float));
+        cudaMalloc(&d_output, size.x*units*sizeof(float)); 
     }
 
     void dealloc(){
-        cudaFree(d_offset);
+        cudaFree(d_bias);
         cudaFree(d_weights);
         cudaFree(d_output);
     }

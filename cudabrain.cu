@@ -1,42 +1,35 @@
 #include <cuda.h>
 #include "layer.h"
 #include <iostream>
+#include <math.h>
 
 #define BLOCK_SIZE 32
 
-__device__ void Dense(float *input, float *weights, float *output)
+__device__ int Sigmoid(float val)
 {
-//    int x = blockIdx.x*blockDim.x+threadIdx.x;
-//    int y = blockIdx.y*blockDim.y+threadIdx.y;
-
-    
+    return 1/ (1 + exp(-val));
 }
 
-__device__ void Sigmoid(int *input, int* output)
-{
-
-}
-
-__global__ void FeedForward(float data[], float weights[], /*float bias[],*/ float output[], dim3 size)
+__global__ void FeedForward(float data[], float weights[], float bias[], float output[], dim3 size, int activation)
 {
     __shared__ float As[BLOCK_SIZE][BLOCK_SIZE];
     __shared__ float Bs[BLOCK_SIZE][BLOCK_SIZE];
 
-    int blockRow = blockIdx.y;
-    int blockCol = blockIdx.x;
+    int blockRow = blockIdx.x;
+    int blockCol = blockIdx.y;
 
-    int threadRow = threadIdx.y;
-    int threadCol = threadIdx.x;
+    int threadRow = threadIdx.x;
+    int threadCol = threadIdx.y;
 
-    int row = blockRow*BLOCK_SIZE + threadIdx.y;
-    int col = blockCol*BLOCK_SIZE + threadIdx.x;
+    int row = blockRow*BLOCK_SIZE + threadRow;
+    int col = blockCol*BLOCK_SIZE + threadCol;
 
     if(row > size.x || col > size.z)
         return;
 
     int pos = row * size.z + col;
 
-    float Cvalue = 0;//bias[pos];
+    float Cvalue = bias[pos];
 
     int prevrows = row*size.z + threadCol;
     int prevcols = threadRow*size.z + col;
@@ -55,43 +48,45 @@ __global__ void FeedForward(float data[], float weights[], /*float bias[],*/ flo
             Cvalue += As[threadRow][e] * Bs[e][threadCol];
         __syncthreads();
     }
-
-    output[pos] = Cvalue;
+    if(activation == SIGMOID)
+        output[pos] = Sigmoid(Cvalue);
+    else
+        output[pos] = Cvalue;
 }
-/*
+
+
 int fit(Dense model[], float *data, float *labels,
         const int epochs, int batch_size, int val_split)
 {
     float* d_data;
     float* d_labels;
-    cudaMalloc(&d_data, size.x * size.y * sizeof(float));
-    cudaMemcpy(d_data, data, size.x * size.y * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMalloc(&d_labels, size.x * labelsize * sizeof(float));
-    cudaMemcpy(d_labels, labels, size.x * labelsize * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMalloc(&d_data, model[0].size.x * model[0].size.y * sizeof(float));
+    cudaMemcpy(d_data, data, model[0].size.x * model[0].size.y * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMalloc(&d_labels, sizeof(labels));
+    cudaMemcpy(d_labels, labels, sizeof(labels), cudaMemcpyHostToDevice);
 
     dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
     
     for(int i=0; i<sizeof(model)/sizeof(model[0]); i++)
     {
-        dim3 dimGrid(model[i].numcols / BLOCK_SIZE, model[i].units / BLOCK_SIZE);
+        dim3 dimGrid(model[i].size.y / BLOCK_SIZE, model[i].size.z / BLOCK_SIZE);
         InitializeWeights<<<dimGrid, dimBlock>>>(model[i].d_weights);
     }
 
     //feed forward parth, matrix multiply each input by the weights matrix
     for(int i=0; i<sizeof(model)/sizeof(model[0]); i++)
     {
-        dim3 dimGrid(model[i].data_len / BLOCK_SIZE)
-        FeedForward<<<dimGrid, dimBlock>>>(model[i])
+        dim3 dimGrid(model[i].size.x / BLOCK_SIZE, model[i].size.z / BLOCK_SIZE);
+        FeedForward<<<dimGrid, dimBlock>>>(model[i].d_data, model[i].d_weights, model[i].d_bias, model[i].d_output, model[i].size, model[i].activation);
     }
 
     //for(int i=sizeof(model)/sizeof(model[0]), );
 
     return 1;
 }
-*/
 
 
-int main()//void testMatMul()
+void testMatMul()
 {
     int2 size = make_int2(16384,16384);
     float data[size.x * size.y];
@@ -111,7 +106,7 @@ int main()//void testMatMul()
     cudaMalloc(&d_output, size.x * size.y * sizeof(float));
 
     dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
-    dim3 dimGrid(size.y/BLOCK_SIZE, size.x/BLOCK_SIZE);
+    dim3 dimGrid(size.x/BLOCK_SIZE, size.y/BLOCK_SIZE);
 
         //Use Cuda Events for timing
         cudaEvent_t start, stop;
@@ -120,7 +115,7 @@ int main()//void testMatMul()
         cudaEventCreate(&stop);
         cudaEventRecord(start, 0);
 
-        FeedForward<<<dimGrid, dimBlock>>>(d_data, d_weights, d_output, dim3(16384,16384,16384));
+        FeedForward<<<dimGrid, dimBlock>>>(d_data, d_weights, d_output, d_output, dim3(16384,16384,16384), SIGMOID);
         
         cudaEventRecord(stop, 0);
         cudaEventSynchronize(stop);
@@ -129,7 +124,6 @@ int main()//void testMatMul()
                  << time << "ms" << std::endl;
 }
 
-/*
 int main()
 {
     int2 size = make_int2(1024,1024);
@@ -152,7 +146,7 @@ int main()
     Dense l1 = Dense(d_data, 100,100, 10, 1, 1);
     Dense l2 = Dense(l1.d_output, 100,10, 1, 1, 1);
 
-    Dense model[2] = {input, l1, l2};
+    Dense model[2] = {l1, l2};
 
     int epochs = 10;
     int batch_size = 100;
@@ -160,4 +154,3 @@ int main()
     fit(model, data, labels, 
         epochs, batch_size, validation_split);
 }
-*/
