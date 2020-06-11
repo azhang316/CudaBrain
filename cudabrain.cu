@@ -19,9 +19,9 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
     }
 }
 
-__device__ int Sigmoid(float val)
+__device__ inline float Sigmoid(float val)
 {
-    return 1/ (1 + exp(-val));
+    return 1.0f/ (1.0f + exp(-val));
 }
 
 // Weight initialization is done serially, as the majority of random number
@@ -83,13 +83,13 @@ __global__ void FeedForward(float data[], float weights[], float bias[], float o
     int row = blockRow*BLOCK_SIZE + threadRow;
     int col = blockCol*BLOCK_SIZE + threadCol;
 
-   // if(row > size.x || col > size.z)
-   //     return;
+    if(row > size.x || col > size.z)
+        return;
 
     int pos = row * size.z + col;
 
     float Cvalue = bias[col];
-/*
+    
     int prevrows = row*size.z + threadCol;
     int prevcols = threadRow*size.z + col;
 
@@ -107,10 +107,10 @@ __global__ void FeedForward(float data[], float weights[], float bias[], float o
             Cvalue += As[threadRow][e] * Bs[e][threadCol];
         __syncthreads();
     }
-   // if(activation == SIGMOID)
-   //     output[pos] = Sigmoid(Cvalue);
-   // else
-  */   output[pos] = Cvalue;
+    if(activation == SIGMOID)
+        output[pos] = Sigmoid(Cvalue);
+    else
+        output[pos] = Cvalue;
 }
     
 
@@ -142,19 +142,18 @@ int fit(Dense model[], float *data, float *labels,
         dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
         dim3 dimGrid((model[i].size.x - 1) / BLOCK_SIZE + 1, (model[i].size.z - 1) / BLOCK_SIZE + 1);
         printf("feedforward gridsize: %d,%d\n", dimGrid.x, dimGrid.y);
-        FeedForward<<<dimGrid, dimBlock>>>(model[i].d_data, model[i].d_weights, model[i].d_bias, 
-                model[i].d_output, model[i].size, model[i].activation);
+        FeedForward<<<dimGrid, dimBlock>>>(model[i].d_data, model[i].d_weights, 
+                model[i].d_bias, model[i].d_output, 
+                model[i].size, model[i].activation);
         gpuErrchk( cudaPeekAtLastError() );
         gpuErrchk( cudaDeviceSynchronize() );
     }
-    int output_size = model[0].size.x * model[0].size.y * sizeof(float);
+    int output_size = model[0].size.x * model[0].size.z * sizeof(float);
     float *output = (float*) malloc(output_size);
-    printf("output dims: %d, %d, %d\n", model[0].size.x, model[0].size.y, sizeof(output));
-    cudaMemcpy(output, d_data, output_size, cudaMemcpyDeviceToHost);
-    printf("output dims: %d, %d, %d\n", model[0].size.x, model[0].units, sizeof(output));
+    cudaMemcpy(output, model[0].d_output, output_size, cudaMemcpyDeviceToHost);
 
-    for(int i=0; i< 1024; i++)
-        printf("%f \n", data[i]);
+    for(int i=0; i< output_size; i++)
+        printf("%f \n", output[i]);
 
     return 1;
 }
@@ -201,12 +200,12 @@ void testMatMul()
 int main()
 {
     printf("start");
-    int2 size = make_int2(1024,1024);
+    int2 size = make_int2(256,256);
     int labelsize = 2;
     float *data = (float*)malloc(size.x * size.y * sizeof(float));
     float *labels = (float*)malloc(size.x * labelsize * sizeof(float));
 
-    for(int i = 0; i < 1024*1024; i++)
+    for(int i = 0; i < 256*256; i++)
         data[i] = 1;
 
     float* d_data;
@@ -222,9 +221,9 @@ int main()
 
     printf("before creating dense layers \n");
 
-    Dense l1 = Dense(d_data, 1024,1024, 1024, SIGMOID, 1);
-    Dense l2 = Dense(l1.d_output, 1024,1024, 128, SIGMOID, 1);
-    Dense l3 = Dense(l2.d_output, 1024, 128, 2, SIGMOID, 1);
+    Dense l1 = Dense(d_data, 256, 256, 64, SIGMOID, 1);
+    Dense l2 = Dense(l1.d_output, 256, 64, 32, SIGMOID, 1);
+    Dense l3 = Dense(l2.d_output, 256, 32, 1, SIGMOID, 1);
     const int num_layers = 3;
     
     Dense model[num_layers] ={l1, l2, l3};
