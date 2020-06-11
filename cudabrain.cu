@@ -2,12 +2,55 @@
 #include "layer.h"
 #include <iostream>
 #include <math.h>
+#include <random>
+#include <stdio.h>
+#include <time.h>
 
 #define BLOCK_SIZE 32
 
 __device__ int Sigmoid(float val)
 {
     return 1/ (1 + exp(-val));
+}
+
+// Weight initialization is done serially, as the majority of random number
+// generators are sequential by nature. While there are some counter based random number
+// generators, the ones I found were quite difficult to understand.
+void InitializeWeights(float *d_weights, int size)
+{
+    printf("generating %d random numbers\n", size);
+    clock_t start = clock();
+    
+    float *rands = (float*)malloc(size*sizeof(float));
+
+    /* no longer using c++ default rng
+    std::default_random_engine generator;
+    std::normal_distribution<float> distribution{0.0,0.01};
+    for (int i=0; i<size; i++)
+        rands[i] = distribution(generator); */
+
+// Implementing the Marsaglia polar method of generating random numbers on
+// a normal distribution. The standard deviation that is used is 0.01
+    float r1 = 1, r2 = 1, S = 1, root;
+    for(int i = 0; i<size-1; i+=2)
+    {
+        do
+        {
+            r1 = 2.0 * rand() / (double)RAND_MAX - 1;
+            r2 = 2.0 * rand() / (double)RAND_MAX - 1;
+            S = r1*r1 + r2*r2;
+        }while(S >=1 || S==0);
+        root = sqrt(-log(S) / 5 / S); //sqrt(-2.0 * log(S) / S) * 0.01;
+        rands[i] = r1 * root;
+        rands[i+1] = r2 * root;
+    }
+    rands[size-1] = r2 * root;
+
+    cudaMemcpy(d_weights, rands, size*sizeof(float), cudaMemcpyHostToDevice);
+
+    clock_t end = clock();
+    double cpu_time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
+    printf("initialize weights took %f seconds \n", cpu_time_used);
 }
 
 __global__ void FeedForward(float data[], float weights[], float bias[], float output[], dim3 size, int activation)
@@ -56,7 +99,7 @@ __global__ void FeedForward(float data[], float weights[], float bias[], float o
 
 
 int fit(Dense model[], float *data, float *labels,
-        const int epochs, int batch_size, int val_split)
+        const int num_layers, const int epochs, int batch_size, int val_split)
 {
     float* d_data;
     float* d_labels;
@@ -66,15 +109,15 @@ int fit(Dense model[], float *data, float *labels,
     cudaMemcpy(d_labels, labels, sizeof(labels), cudaMemcpyHostToDevice);
 
     dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
-    
-    for(int i=0; i<sizeof(model)/sizeof(model[0]); i++)
+    printf("got to initialize weights\n");
+    for(int i=0; i<num_layers; i++)
     {
-        dim3 dimGrid(model[i].size.y / BLOCK_SIZE, model[i].size.z / BLOCK_SIZE);
-        InitializeWeights<<<dimGrid, dimBlock>>>(model[i].d_weights);
+        InitializeWeights(model[i].d_weights, model[i].size.y * model[i].size.z);
+        InitializeWeights(model[i].d_bias, model[i].size.z);
     }
 
     //feed forward parth, matrix multiply each input by the weights matrix
-    for(int i=0; i<sizeof(model)/sizeof(model[0]); i++)
+    for(int i=0; i<num_layers; i++)
     {
         dim3 dimGrid(model[i].size.x / BLOCK_SIZE, model[i].size.z / BLOCK_SIZE);
         FeedForward<<<dimGrid, dimBlock>>>(model[i].d_data, model[i].d_weights, model[i].d_bias, model[i].d_output, model[i].size, model[i].activation);
@@ -126,16 +169,19 @@ void testMatMul()
 
 int main()
 {
-    int2 size = make_int2(1024,1024);
+    printf("start");
+    int2 size = make_int2(2048,2048);
     int labelsize = 2;
-    float data[size.x * size.y];
-    float labels[size.x * labelsize];
+    float *data = (float*)malloc(size.x * size.y * sizeof(float));
+    float *labels = (float*)malloc(size.x * labelsize * sizeof(float));
 
-    for(int i = 0; i < 1024*1024; i++)
+    for(int i = 0; i < 2048*2048; i++)
         data[i] = 1;
 
     float* d_data;
     float* d_labels;
+
+    printf("data size: %d ... inputted %d", sizeof(data), size.x * size.y * sizeof(float));
 
     cudaMalloc(&d_data, size.x * size.y * sizeof(float));
     cudaMemcpy(d_data, data, size.x * size.y * sizeof(float), cudaMemcpyHostToDevice);
@@ -143,14 +189,19 @@ int main()
     cudaMalloc(&d_labels, size.x * labelsize * sizeof(float));
     cudaMemcpy(d_labels, labels, size.x * labelsize * sizeof(float), cudaMemcpyHostToDevice);
 
-    Dense l1 = Dense(d_data, 100,100, 10, 1, 1);
-    Dense l2 = Dense(l1.d_output, 100,10, 1, 1, 1);
+    printf("before creating dense layers \n");
 
-    Dense model[2] = {l1, l2};
+    Dense l1 = Dense(d_data, 2048,2048, 1024, 1, 1);
+    Dense l2 = Dense(l1.d_output, 2048,1024, 128, 1, 1);
+    Dense l3 = Dense(l2.d_output, 2048, 128, 2, 1, 1);
+    const int num_layers = 3;
+    
+    Dense model[num_layers] ={l1, l2, l3};
 
     int epochs = 10;
     int batch_size = 100;
     int validation_split = 0.2;
+    printf("got to fit\n");
     fit(model, data, labels, 
-        epochs, batch_size, validation_split);
+        num_layers, epochs, batch_size, validation_split);
 }
