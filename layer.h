@@ -64,6 +64,8 @@ public:
     float *d_output;
     int units; //outputs of layer
 
+    float *deriv_error;
+
     /* Constructor: we create this class on the CPU and memory is copied to GPU for usage*/ 
     //__host__
 public:
@@ -82,12 +84,14 @@ public:
         cudaMalloc(&d_bias, units*sizeof(float));
         cudaMalloc(&d_weights, size.y*units*sizeof(float));
         cudaMalloc(&d_output, size.x*units*sizeof(float)); 
+        cudaMalloc(&deriv_error, units*sizeof(float));
     }
 
     void dealloc(){
         cudaFree(d_bias);
         cudaFree(d_weights);
         cudaFree(d_output);
+        cudaFree(deriv_error);
     }
 };
 

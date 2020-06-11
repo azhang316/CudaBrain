@@ -19,7 +19,7 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
     }
 }
 
-__device__ inline float Sigmoid(float val)
+__device__ inline float sigmoid(float val)
 {
     return 1.0f/ (1.0f + exp(-val));
 }
@@ -29,7 +29,7 @@ __device__ inline float Sigmoid(float val)
 // While there are some counter based random number
 // generators, the ones I found were quite difficult to understand.
 // Thus I optimized this by using the Marsaglia algorithm
-void InitializeWeights(float *d_weights, int size)
+void initializeWeights(float *d_weights, int size)
 {
     //printf("generating %d random numbers\n", size);
     //clock_t start = clock();
@@ -69,7 +69,7 @@ void InitializeWeights(float *d_weights, int size)
     //    printf("%f\n",rands[i]);
 }
 
-__global__ void FeedForward(float data[], float weights[], float bias[], float output[], dim3 size, int activation)
+__global__ void feedForward(float data[], float weights[], float bias[], float output[], dim3 size, int activation)
 {
     __shared__ float As[BLOCK_SIZE][BLOCK_SIZE];
     __shared__ float Bs[BLOCK_SIZE][BLOCK_SIZE];
@@ -108,52 +108,88 @@ __global__ void FeedForward(float data[], float weights[], float bias[], float o
         __syncthreads();
     }
     if(activation == SIGMOID)
-        output[pos] = Sigmoid(Cvalue);
+        output[pos] = sigmoid(Cvalue);
     else
         output[pos] = Cvalue;
 }
-    
+
+__device__ float mse(float *d_prediction, float *d_actual)
+{
+    tid = blockId.x * blockDim.x + threadId.x;
+    summation of differences squared ... see optimized kernel
+}
+
+__device__ float deriv_error(float d_output, float d_actual, float d_weights )
+{
+    de_dout = d_output - d_actual; //previous derivative error
+    dout_dnet = d_output[] * (1-output[i]);
+    return de_dout * dout_dnet * sum(weights);
+} 
+
+__device__ float gradient(float *d_input, float *d_output,float *deriv_error) //used for changing weight values in update
+{
+    float de_dout = deriv_error(); // d_output[] - d_actual;
+    float dout_dnet = d_output[] * (1-d_output[]);
+    float dnet_dweight = d_input[]; // can be adapted to bias term by making this 1.
+
+    return = de_dout * dout_dnet * dnet_dweight;
+}
+
+__device__ void update()
+{
+    d_weight -= learning_rate * gradient()
+}
+
+__global__ void backPropagate(float *deriv_err, float * prev_deriv_err, 
+                              float *wieghts, float *output)
+{
+    //sum weights together with gather operation
+    //use map operation to multiply by d_output[]*(1-output[i])*prev_deriv_error[i]
+}
 
 int fit(Dense model[], float *data, float *labels,
         const int num_layers, const int epochs, int batch_size, int val_split)
 {
     float* d_data;
     float* d_labels;
-    cudaMalloc(&d_data, model[0].size.x * model[0].size.y * sizeof(float));
-    cudaMemcpy(d_data, data, model[0].size.x * model[0].size.y * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMalloc(&d_labels, sizeof(labels));
-    cudaMemcpy(d_labels, labels, sizeof(labels), cudaMemcpyHostToDevice);
+    int last = num_layers - 1;
+    int data_size = model[0].size.x * model[0].size.y * sizeof(float);
+    int label_size = model[last].size.x * model[last].size.z * sizeof(float);
+    cudaMalloc(&d_data, data_size);
+    cudaMemcpy(d_data, data, data_size, cudaMemcpyHostToDevice);
+    cudaMalloc(&d_labels, label_size);
+    cudaMemcpy(d_labels, labels, label_size, cudaMemcpyHostToDevice);
 
     
     model[0].d_data = d_data;
 
     dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
-    printf("got to initialize weights\n");
+    printf("Randomly initializing weights ...");
     for(int i=0; i<num_layers; i++)
     {
-        InitializeWeights(model[i].d_weights, model[i].size.y * model[i].size.z);
-        InitializeWeights(model[i].d_bias, model[i].size.z);
+        initializeWeights(model[i].d_weights, model[i].size.y * model[i].size.z);
+        initializeWeights(model[i].d_bias, model[i].size.z);
     }
+    printf("Done.\n");
 
     //feed forward parth, matrix multiply each input by the weights matrix
     for(int i=0; i<num_layers; i++)
     {
-        printf("%d,%d\n",model[i].size.x/BLOCK_SIZE,model[i].size.z/BLOCK_SIZE);
         dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
-        dim3 dimGrid((model[i].size.x - 1) / BLOCK_SIZE + 1, (model[i].size.z - 1) / BLOCK_SIZE + 1);
+        dim3 dimGrid((model[i].size.x - 1) / BLOCK_SIZE + 1,
+                     (model[i].size.z - 1) / BLOCK_SIZE + 1);
         printf("feedforward gridsize: %d,%d\n", dimGrid.x, dimGrid.y);
-        FeedForward<<<dimGrid, dimBlock>>>(model[i].d_data, model[i].d_weights, 
+        feedForward<<<dimGrid, dimBlock>>>(model[i].d_data, model[i].d_weights, 
                 model[i].d_bias, model[i].d_output, 
                 model[i].size, model[i].activation);
         gpuErrchk( cudaPeekAtLastError() );
         gpuErrchk( cudaDeviceSynchronize() );
     }
-    int output_size = model[0].size.x * model[0].size.z * sizeof(float);
-    float *output = (float*) malloc(output_size);
-    cudaMemcpy(output, model[0].d_output, output_size, cudaMemcpyDeviceToHost);
+    float *prediction = (float*) malloc(label_size);
+    cudaMemcpy(prediction, model[last].d_output, label_size, cudaMemcpyDeviceToHost);
 
-    for(int i=0; i< output_size; i++)
-        printf("%f \n", output[i]);
+    for(int i=0; i< label_size; i++)
+        printf("%f \n", prediction[i]);
 
     return 1;
 }
