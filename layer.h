@@ -46,7 +46,8 @@ public:
         cudaFree(d_output);
     }
 
-};*/
+};
+*/
 
 class Dense //: public Layer
 {

@@ -173,9 +173,9 @@ __device__ float gradient(float *d_input, float *d_output,float *deriv_error) //
     return 1.0f;
 }
 
-__device__ void update()
+__device__ void update(float d_weight, const float learning_rate)
 {
-    //d_weight -= learning_rate * gradient()
+   // d_weight -= learning_rate * gradient();
 }
 
 // implementing a a map operation followed by a gather operation 
@@ -234,7 +234,7 @@ int fit(Dense model[], float *data, float *labels,
         initializeWeights(model[i].d_bias, model[i].size.z);
     }
     printf("Done.\n");
-
+//for(int j=0; j<epochs; j++)
     //feed forward parth, matrix multiply each input by the weights matrix
     for(int i=0; i<num_layers; i++)
     {
@@ -242,7 +242,12 @@ int fit(Dense model[], float *data, float *labels,
         dim3 dimGrid((model[i].size.x - 1) / BLOCK_SIZE + 1,
                      (model[i].size.z - 1) / BLOCK_SIZE + 1);
         printf("feedforward gridsize: %d,%d\n", dimGrid.x, dimGrid.y);
-        feedForward<<<dimGrid, dimBlock>>>(model[i].d_data, model[i].d_weights, 
+        
+        
+        float *transposed;
+        cudaMalloc(&transposed, model[i].size.z * model[i].size.y * sizeof(float));
+        matTran<<<dimGrid, dimBlock>>>(model[i].d_weights, transposed);
+        feedForward<<<dimGrid, dimBlock>>>(model[i].d_data, transposed, 
                 model[i].d_bias, model[i].d_output, 
                 model[i].size, model[i].activation);
         gpuErrchk( cudaPeekAtLastError() );
@@ -259,14 +264,14 @@ int fit(Dense model[], float *data, float *labels,
    
     
     //derivativeError<<<1, dimBlock1>>>(model[last].deriv_error, 0,
-      //                                   d_labels, model[last].deriv_error);
+    //                                   d_labels, model[last].deriv_error);
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchk( cudaDeviceSynchronize() );
     
     float *error = (float*) malloc(label_size);
     cudaMemcpy(error, model[last].deriv_error, label_size, cudaMemcpyDeviceToHost);
 
-    for(int i=0; i< 256; i++)
+    for(int i=0; i< 100; i++)
         printf("%f \n", error[i]);
 
     return 1;
