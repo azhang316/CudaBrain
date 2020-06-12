@@ -84,7 +84,7 @@ public:
         cudaMalloc(&d_bias, units*sizeof(float));
         cudaMalloc(&d_weights, size.y*units*sizeof(float));
         cudaMalloc(&d_output, size.x*units*sizeof(float)); 
-        cudaMalloc(&deriv_error, units*sizeof(float));
+        cudaMalloc(&deriv_error, 1024 * units*sizeof(float));
     }
 
     void dealloc(){

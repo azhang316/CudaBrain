@@ -13,5 +13,8 @@
 #SBATCH --account=am-148-s20
 
 module load cuda10.1/10.1.168
+module load numpy/1.17.0
 
 srun cudabrain.exe
+##python matmul.py
+##srun matmul.exe

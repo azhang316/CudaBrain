@@ -69,17 +69,37 @@ void initializeWeights(float *d_weights, int size)
     //    printf("%f\n",rands[i]);
 }
 
+__global__
+void matTran(float *A, float *B)
+{
+    __shared__ float As[BLOCK_SIZE][BLOCK_SIZE];
+
+    int blockRow = blockIdx.y;
+    int blockCol = blockIdx.x;
+
+    int row = threadIdx.y;
+    int col = threadIdx.x;
+
+    int pos = blockRow*BLOCK_SIZE*BLOCK_SIZE+row*BLOCK_SIZE + 
+          blockCol*BLOCK_SIZE+ col;
+    As[col][row] = A[pos];
+    __syncthreads();
+
+    B[pos] = As[row][col];
+}
+
+// expects weights to be transposed already
 __global__ void feedForward(float data[], float weights[], float bias[], float output[], dim3 size, int activation)
 {
     __shared__ float As[BLOCK_SIZE][BLOCK_SIZE];
     __shared__ float Bs[BLOCK_SIZE][BLOCK_SIZE];
 
-    int blockRow = blockIdx.x;
-    int blockCol = blockIdx.y;
+    int blockRow = blockIdx.y;
+    int blockCol = blockIdx.x;
 
-    int threadRow = threadIdx.x;
-    int threadCol = threadIdx.y;
-
+    int threadRow = threadIdx.y;
+    int threadCol = threadIdx.x;
+    
     int row = blockRow*BLOCK_SIZE + threadRow;
     int col = blockCol*BLOCK_SIZE + threadCol;
 
@@ -90,21 +110,21 @@ __global__ void feedForward(float data[], float weights[], float bias[], float o
 
     float Cvalue = bias[col];
     
-    int prevrows = row*size.z + threadCol;
-    int prevcols = threadRow*size.z + col;
+    int aprevrows = row*size.z + threadCol;
+    int bprevrows = col*size.z + threadCol;
 
     //processes each output chunk one submatrix at a time to use shared memory optimally
     for(int m = 0; m < gridDim.y; m++)
     {
         //Loading submatrixes into shared memory, Bs is also transposed
-        As[threadRow][threadCol] = data[prevrows + m*BLOCK_SIZE];
-        Bs[threadRow][threadCol] = weights[prevcols + m*BLOCK_SIZE*size.x];
+        As[threadRow][threadCol] = data[aprevrows + m*BLOCK_SIZE];
+        Bs[threadRow][threadCol] = weights[bprevrows + m*BLOCK_SIZE];
         __syncthreads();
 
         //Increments Cvalue for all the shared memory elements
     #pragma unroll
         for(int e = 0; e < BLOCK_SIZE; e++)
-            Cvalue += As[threadRow][e] * Bs[e][threadCol];
+            Cvalue += As[threadRow][e] * Bs[threadCol][e];
         __syncthreads();
     }
     if(activation == SIGMOID)
@@ -113,38 +133,82 @@ __global__ void feedForward(float data[], float weights[], float bias[], float o
         output[pos] = Cvalue;
 }
 
-__device__ float mse(float *d_prediction, float *d_actual)
+__device__ void mse(float *d_prediction, float *d_actual, float *out)
 {
-    tid = blockId.x * blockDim.x + threadId.x;
-    summation of differences squared ... see optimized kernel
+    extern __shared__ float sdata[];
+    
+    int myId = threadIdx.x + blockDim.x*blockIdx.x;
+    int tid = threadIdx.x;
+    sdata[tid] = (d_prediction[myId] - d_actual[myId]);
+    sdata[tid] *= sdata[tid];
+
+    __syncthreads();
+
+    for(int s = blockDim.x/2; s>0; s>>=1)
+    {
+        if(tid<s)
+            sdata[tid] += sdata[tid+s];
+        __syncthreads();
+    }
+    
+    if(tid ==0)
+        out[blockIdx.x] = sdata[0];    
 }
 
 __device__ float deriv_error(float d_output, float d_actual, float d_weights )
 {
-    de_dout = d_output - d_actual; //previous derivative error
-    dout_dnet = d_output[] * (1-output[i]);
-    return de_dout * dout_dnet * sum(weights);
+    //float de_dout = d_output - d_actual; //previous derivative error
+    //float dout_dnet = d_output[] * (1-output[i]);
+    //de_dout * dout_dnet; // * sum(weights);
+    return 1.0f;
 } 
 
 __device__ float gradient(float *d_input, float *d_output,float *deriv_error) //used for changing weight values in update
 {
-    float de_dout = deriv_error(); // d_output[] - d_actual;
-    float dout_dnet = d_output[] * (1-d_output[]);
-    float dnet_dweight = d_input[]; // can be adapted to bias term by making this 1.
+    //float de_dout = deriv_error(); // d_output[] - d_actual;
+    //float dout_dnet = d_output[] * (1-d_output[]);
+    //float dnet_dweight = d_input[]; // can be adapted to bias term by making this 1.
 
-    return = de_dout * dout_dnet * dnet_dweight;
+    //return = de_dout * dout_dnet * dnet_dweight;
+    return 1.0f;
 }
 
 __device__ void update()
 {
-    d_weight -= learning_rate * gradient()
+    //d_weight -= learning_rate * gradient()
 }
 
-__global__ void backPropagate(float *deriv_err, float * prev_deriv_err, 
+// implementing a a map operation followed by a gather operation 
+// the gather operation is only used on each column, while
+// the rows are left separate.
+__global__ void derivativeError(float *output, float *actual, float *deriv_err)
+{
+    __shared__ float sdata[1024];
+
+    //ideally block is 1024x1 and grid is ??? x units
+    int row = blockIdx.x * blockDim.x + threadIdx.x;
+    int col = blockIdx.y;
+    
+    sdata[threadIdx.x] = output[row*gridDim.y + col];
+    __syncthreads();
+
+    for(int s= blockDim.x / 2; s>0; s>>=1)
+    {
+        if(threadIdx.x < s)
+            sdata[threadIdx.x] += sdata[threadIdx.x+s];
+        __syncthreads();
+    }
+    if(threadIdx.x == 0) //only tid0 can write
+    {    
+        /*deriv_err[blockIdx.x] = sdata[0]*/deriv_err[blockDim.y*blockIdx.x+col] = sdata[blockIdx.x];
+    }
+}
+
+__global__ void backPropagate(float *deriv_err, float *prev_deriv_err, 
                               float *wieghts, float *output)
 {
-    //sum weights together with gather operation
-    //use map operation to multiply by d_output[]*(1-output[i])*prev_deriv_error[i]
+    //use map operation to multiply d_output[i]*(1-output[i])*prev_deriv_error[i]*weight[i]
+    //use gather operation to gather all these together.
 }
 
 int fit(Dense model[], float *data, float *labels,
@@ -163,7 +227,6 @@ int fit(Dense model[], float *data, float *labels,
     
     model[0].d_data = d_data;
 
-    dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
     printf("Randomly initializing weights ...");
     for(int i=0; i<num_layers; i++)
     {
@@ -185,22 +248,37 @@ int fit(Dense model[], float *data, float *labels,
         gpuErrchk( cudaPeekAtLastError() );
         gpuErrchk( cudaDeviceSynchronize() );
     }
-    float *prediction = (float*) malloc(label_size);
-    cudaMemcpy(prediction, model[last].d_output, label_size, cudaMemcpyDeviceToHost);
 
-    for(int i=0; i< label_size; i++)
-        printf("%f \n", prediction[i]);
+    dim3 dimBlock1(1024,1);
+    dim3 dimGrid1((model[last].size.y-1)/1024+1,model[last].size.z);
+    derivativeError<<<dimGrid1, dimBlock1>>>(model[last].d_output, 
+                      d_labels, model[last].deriv_error);
+
+    gpuErrchk( cudaPeekAtLastError() );
+    gpuErrchk( cudaDeviceSynchronize() );
+   
+    
+    //derivativeError<<<1, dimBlock1>>>(model[last].deriv_error, 0,
+      //                                   d_labels, model[last].deriv_error);
+    gpuErrchk( cudaPeekAtLastError() );
+    gpuErrchk( cudaDeviceSynchronize() );
+    
+    float *error = (float*) malloc(label_size);
+    cudaMemcpy(error, model[last].deriv_error, label_size, cudaMemcpyDeviceToHost);
+
+    for(int i=0; i< 256; i++)
+        printf("%f \n", error[i]);
 
     return 1;
 }
 
-/*
-void testMatMul()
+
+void testMatMul(int s)
 {
-    int2 size = make_int2(16384,16384);
+    int2 size = make_int2(s,s);
     float data[size.x * size.y];
 
-    for(int i = 0; i < 16384*16384; i++)
+    for(int i = 0; i < s*s; i++)
         data[i] = 1;
 
     float* d_data;
@@ -223,8 +301,11 @@ void testMatMul()
         cudaEventCreate(&start);
         cudaEventCreate(&stop);
         cudaEventRecord(start, 0);
-
-        FeedForward<<<dimGrid, dimBlock>>>(d_data, d_weights, d_output, d_output, dim3(16384,16384,16384), SIGMOID);
+        
+        float *transposed;
+        cudaMalloc(&transposed, size.x * size.y * sizeof(float));
+        matTran<<<dimGrid, dimBlock>>>(d_weights, transposed);
+        feedForward<<<dimGrid, dimBlock>>>(d_data, transposed, d_output, d_output, dim3(s,s,s), SIGMOID);
         
         cudaEventRecord(stop, 0);
         cudaEventSynchronize(stop);
@@ -232,7 +313,7 @@ void testMatMul()
         std::cout<< " Shared Memory Matrix Multiplication time =" << '\t'
                  << time << "ms" << std::endl;
 }
-*/
+
 int main()
 {
     printf("start");
@@ -257,9 +338,9 @@ int main()
 
     printf("before creating dense layers \n");
 
-    Dense l1 = Dense(d_data, 256, 256, 64, SIGMOID, 1);
+    Dense l1 = Dense(d_data, 256, 256, 64, SIGMOID, 1); 
     Dense l2 = Dense(l1.d_output, 256, 64, 32, SIGMOID, 1);
-    Dense l3 = Dense(l2.d_output, 256, 32, 1, SIGMOID, 1);
+    Dense l3 = Dense(l2.d_output, 256, 32, 16, SIGMOID, 1);
     const int num_layers = 3;
     
     Dense model[num_layers] ={l1, l2, l3};
@@ -267,7 +348,16 @@ int main()
     int epochs = 10;
     int batch_size = 100;
     int validation_split = 0.2;
-    printf("got to fit\n");
     fit(model, data, labels, 
         num_layers, epochs, batch_size, validation_split);
+
+    /*
+    testMatMul(16);
+    testMatMul(16);
+    testMatMul(64);
+    testMatMul(256);
+    testMatMul(2048);
+    testMatMul(8192);
+    testMatMul(16384);
+    testMatMul(32768);*/
 }
